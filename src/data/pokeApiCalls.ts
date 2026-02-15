@@ -1,8 +1,35 @@
-import { CalculateIndexes, type Indexes } from "../utils/calculateIndexes";
+import { CalculateIndexes } from "../utils/calculateIndexes";
+import { TOTAL_POKEMONS } from "./dto/pokeConstants";
 import { Pokemon } from "./dto/pokemon";
 
-export function initializeEmptyPokemon() {
+export function initializeEmptyPokemonById() {
   return new Map<number, Pokemon>();
+}
+
+export function initializeEmptyPokemonByName() {
+  return new Map<string, number>();
+}
+
+export function initializeEmptyPokeNames(): string[] {
+  return [];
+}
+
+export async function getPokeNames() {
+  try {
+    const response = await fetch(
+      `https://pokeapi.co/api/v2/pokemon?limit=${TOTAL_POKEMONS}`,
+    );
+
+    const jsonResponse = await response.json();
+
+    const pokeNames = jsonResponse.results.map((x) => {
+      return x.name;
+    });
+
+    return pokeNames;
+  } catch (err) {
+    console.log("failed to fetch pokemon names");
+  }
 }
 
 export async function getPokemon(pokemangz: string | number) {
@@ -11,15 +38,9 @@ export async function getPokemon(pokemangz: string | number) {
       `https://pokeapi.co/api/v2/pokemon/${pokemangz}`,
     );
 
-    let jsonResponse;
+    const jsonResponse = await response.json();
 
-    try {
-      jsonResponse = await response.json();
-
-      return new Pokemon(jsonResponse);
-    } catch (err) {
-      console.log("Pokemangz not found", pokemangz);
-    }
+    return new Pokemon(jsonResponse);
   } catch (err) {
     console.log("Cannot fetch pokemganz", err);
   }
@@ -30,15 +51,33 @@ export async function getPokemonMap(
   pokemon: Map<number, Pokemon>,
 ) {
   const indexes = CalculateIndexes(page);
+  const arrayOfPromises: Promise<Pokemon | undefined>[] = [];
 
-  for (let i = indexes.start; i < indexes.stop; i++) {
+  for (let i = indexes.start; i < indexes.stop && i < TOTAL_POKEMONS; i++) {
     if (!pokemon.has(i)) {
-      const poke = await getPokemon(i);
-      if (poke) pokemon.set(i, poke);
+      arrayOfPromises.push(getPokemon(i));
     }
   }
 
+  const results = await Promise.all(arrayOfPromises);
+
+  for (const poke of results) {
+    if (poke) pokemon.set(poke.id, poke);
+  }
+
   return pokemon;
+}
+
+export function getPokemanNameMap(
+  pokemon: Map<number, Pokemon>,
+): Map<string, number> {
+  const pokeNameMap = new Map<string, number>();
+
+  for (const [key, value] of pokemon.entries()) {
+    pokeNameMap.set(value.name.toLowerCase(), key);
+  }
+
+  return pokeNameMap;
 }
 
 export function getPokemonList(page: number, pokemon: Map<number, Pokemon>) {

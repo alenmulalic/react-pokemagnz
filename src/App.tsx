@@ -4,28 +4,49 @@ import Pagination from "./components/pagination";
 import PokeList from "./components/pokeList";
 import PokeStats from "./components/pokeStats";
 import SearchBar from "./components/searchBar";
-import { TOTAL_POKEMONS, MAX_PAGES } from "./data/dto/pokeConstants";
+import { TOTAL_POKEMONS, MAX_PAGES, PAGE_SIZE } from "./data/dto/pokeConstants";
 import type { Pokemon } from "./data/dto/pokemon";
 import {
-  initializeEmptyPokemon,
+  initializeEmptyPokemonById,
   getPokemonMap,
   getPokemonList,
   getPokemon,
+  initializeEmptyPokeNames,
+  getPokeNames,
+  getPokemanNameMap,
+  initializeEmptyPokemonByName,
 } from "./data/pokeApiCalls";
+import fuzzysort from "fuzzysort";
 
 function App() {
-  const [pokemons, setPokemons] = useState(initializeEmptyPokemon);
+  const [pokeNames, setPokeNames] = useState(initializeEmptyPokeNames());
+  const [recalculatePokeNames, setRecalculatePokeNames] = useState(false);
+  const [pokemonById, setPokemonById] = useState(initializeEmptyPokemonById);
+  const [pokemonByName, setPokemonByName] = useState(
+    initializeEmptyPokemonByName,
+  );
   const [pokeList, setPokeList] = useState([] as Pokemon[]);
   const [page, setPage] = useState(1);
   const [showDetails, setShowDetails] = useState(false);
   const [selectedPoke, setSelectedPoke] = useState(0);
 
   useEffect(() => {
+    async function fetchPokeNames() {
+      const pokeNames = await getPokeNames();
+      setPokeNames(pokeNames);
+    }
+
+    fetchPokeNames();
+  }, [recalculatePokeNames]);
+
+  useEffect(() => {
     async function fetchPokemonList() {
-      const data = await getPokemonMap(page, pokemons);
+      const data = await getPokemonMap(page, pokemonById);
+      const nameMap = getPokemanNameMap(data);
       const pokelist = getPokemonList(page, data);
 
-      setPokemons(data);
+      setPokemonById(data);
+      setPokemonByName(nameMap);
       setPokeList(pokelist);
     }
 
@@ -55,7 +76,7 @@ function App() {
         return;
       }
 
-      const poke = pokemons.get(id);
+      const poke = pokemonById.get(id);
 
       if (!poke) {
         const pokeMon = await getPokemon(id);
@@ -64,7 +85,7 @@ function App() {
           return;
         }
 
-        setPokemons((prev) => {
+        setPokemonById((prev) => {
           const newMap = new Map(prev);
           newMap.set(id, pokeMon);
           return newMap;
@@ -75,13 +96,45 @@ function App() {
       setSelectedPoke(id);
     }
 
-    for (const [key, value] of pokemons.entries()) {
-      const pokeName = value.name.toLowerCase();
-      if (pokeName === val.toLowerCase()) {
-        setShowDetails(true);
-        setSelectedPoke(key);
+    const results = fuzzysort.go(val, pokeNames);
+    const fuzzyPokes: string[] = [];
+    let i = 0;
+    while (i < results.length && i < PAGE_SIZE) {
+      fuzzyPokes.push(results[i].target);
+      i++;
+    }
+
+    const newPokeList: Pokemon[] = [];
+    const newMapById = new Map(pokemonById);
+    const newMapByName = new Map(pokemonByName);
+
+    const arrayOfPromises: Promise<Pokemon | undefined>[] = [];
+
+    for (const fuzzyPoke of fuzzyPokes) {
+      const poke = pokemonById.get(
+        pokemonByName.get(fuzzyPoke.toLowerCase()) ?? 0,
+      );
+
+      if (poke) {
+        newPokeList.push(poke);
+      } else {
+        arrayOfPromises.push(getPokemon(fuzzyPoke));
       }
     }
+
+    const promiseResult = await Promise.all(arrayOfPromises);
+
+    for (const res of promiseResult) {
+      if (res) {
+        newMapById.set(res.id, res);
+        newMapByName.set(res.name.toLowerCase(), res.id);
+        newPokeList.push(res);
+      }
+    }
+
+    setPokemonByName(newMapByName);
+    setPokemonById(newMapById);
+    setPokeList(newPokeList);
   }
 
   return (
@@ -103,7 +156,7 @@ function App() {
         </>
       ) : (
         <PokeStats
-          pokemon={pokemons.get(selectedPoke)}
+          pokemon={pokemonById.get(selectedPoke)}
           back={returnToList}
         ></PokeStats>
       )}
